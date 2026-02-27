@@ -1,131 +1,53 @@
 export default async function handler(req, res) {
 
-    const { userId } = req.query;
+  const { userId } = req.query;
 
-    if (!userId || isNaN(userId)) {
-        return res.status(400).json({
-            error: "Invalid or missing userId"
-        });
-    }
+  if (!userId) {
+    return res.status(400).json({ error: "Missing userId" });
+  }
 
-    try {
+  try {
 
-        //--------------------------------------------------
-        // STEP 1: GET ALL USER UNIVERSES (with pagination)
-        //--------------------------------------------------
+    let cursor = "";
+    let passes = [];
 
-        let universes = [];
-        let cursor = null;
+    do {
 
-        do {
+      const url =
+        `https://games.roblox.com/v1/users/${userId}/game-passes?limit=100&cursor=${cursor}`;
 
-            const url =
-                `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=50&sortOrder=Asc`
-                + (cursor ? `&cursor=${cursor}` : "");
+      const response = await fetch(url);
 
-            const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error("Roblox API failed");
+      }
 
-            if (!response.ok)
-                throw new Error("Failed to fetch games");
+      const json = await response.json();
 
-            const json = await response.json();
+      for (const pass of json.data) {
 
-            if (json.data)
-                universes.push(...json.data);
-
-            cursor = json.nextPageCursor;
-
-        } while (cursor);
-
-
-        //--------------------------------------------------
-        // STEP 2: FETCH GAMEPASSES FROM ALL UNIVERSES
-        //--------------------------------------------------
-
-        const passFetchPromises = universes.map(async (game) => {
-
-            let passes = [];
-            let pageToken = null;
-
-            do {
-
-                const url =
-                    `https://apis.roblox.com/game-passes/v1/universes/${game.id}/game-passes`
-                    + `?passView=Full&pageSize=100`
-                    + (pageToken ? `&pageToken=${pageToken}` : "");
-
-                const response = await fetch(url);
-
-                if (!response.ok)
-                    break;
-
-                const json = await response.json();
-
-                if (json.data) {
-
-                    for (const pass of json.data) {
-
-                        if (
-                            pass.price &&
-                            pass.price > 0 &&
-                            pass.creator?.id == userId
-                        ) {
-
-                            passes.push({
-                                id: pass.id,
-                                price: pass.price,
-                                name: pass.name,
-                                universeId: game.id,
-                                iconImageAssetId: pass.iconImageAssetId
-                            });
-
-                        }
-
-                    }
-
-                }
-
-                pageToken = json.nextPageToken;
-
-            } while (pageToken);
-
-            return passes;
-
+        passes.push({
+          id: pass.id,
+          name: pass.name,
+          price: pass.price,
+          creatorId: pass.creator?.id,
         });
 
+      }
 
-        //--------------------------------------------------
-        // STEP 3: WAIT FOR ALL REQUESTS
-        //--------------------------------------------------
+      cursor = json.nextPageCursor;
 
-        const results = await Promise.all(passFetchPromises);
+    } while (cursor);
 
-        //--------------------------------------------------
-        // STEP 4: FLATTEN ARRAY
-        //--------------------------------------------------
+    return res.status(200).json(passes);
 
-        const allPasses = results.flat();
+  }
+  catch (err) {
 
-        //--------------------------------------------------
-        // STEP 5: SORT BY PRICE (LOW → HIGH)
-        //--------------------------------------------------
+    return res.status(500).json({
+      error: err.toString()
+    });
 
-        allPasses.sort((a, b) => a.price - b.price);
-
-
-        //--------------------------------------------------
-        // RETURN RESULT
-        //--------------------------------------------------
-
-        return res.status(200).json(allPasses);
-
-    }
-    catch (err) {
-
-        return res.status(500).json({
-            error: err.message
-        });
-
-    }
+  }
 
 }
