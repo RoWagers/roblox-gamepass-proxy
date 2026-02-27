@@ -1,65 +1,68 @@
+// Roblox Gamepass Proxy (Vercel Serverless Function)
+// Optimized for 2026 Roblox API
+
 export default async function handler(req, res) {
-
-  const { userId } = req.query;
-
-  if (!userId)
-    return res.status(400).json({ error: "Missing userId" });
-
   try {
+    const { userId } = req.query;
 
-    let passes = [];
-    let lastId = "";
+    // Validate input early
+    if (!userId || isNaN(userId)) {
+      return res.status(400).json({
+        error: "Invalid or missing userId"
+      });
+    }
 
-    while (true) {
+    let allPasses = [];
+    let cursor = null;
 
+    // Roblox paginates results, so we must loop
+    do {
       const url =
-        `https://apis.roblox.com/game-passes/v1/users/${userId}/game-passes?count=100` +
-        (lastId ? `&exclusiveStartId=${lastId}` : "");
+        `https://apis.roblox.com/game-passes/v1/users/${userId}/game-passes?limit=100` +
+        (cursor ? `&cursor=${cursor}` : "");
 
       const response = await fetch(url, {
         headers: {
           "Accept": "application/json"
-        }
+        },
+        cache: "no-store"
       });
 
-      if (!response.ok)
-        throw new Error("Roblox API failed: " + response.status);
-
-      const json = await response.json();
-
-      if (!json.data || json.data.length === 0)
-        break;
-
-      for (const pass of json.data) {
-
-        if (pass.priceInRobux != null) {
-
-          passes.push({
-            id: pass.id,
-            name: pass.name,
-            price: pass.priceInRobux
-          });
-
-        }
-
+      if (!response.ok) {
+        throw new Error(`Roblox API failed: ${response.status}`);
       }
 
-      lastId = json.data[json.data.length - 1].id;
+      const data = await response.json();
 
-      if (json.data.length < 100)
-        break;
+      if (Array.isArray(data.gamePasses)) {
+        allPasses.push(...data.gamePasses);
+      }
 
-    }
+      cursor = data.nextPageCursor;
 
-    res.status(200).json(passes);
+    } while (cursor);
 
-  }
-  catch (err) {
+    // Clean and optimize response
+    const formatted = allPasses.map(pass => ({
+      id: pass.gamePassId,
+      name: pass.name,
+      price: pass.price ?? null,
+      forSale: pass.price != null,
+      icon:
+        pass.iconAssetId
+          ? `https://thumbnails.roblox.com/v1/assets?assetIds=${pass.iconAssetId}&size=150x150&format=Png`
+          : null,
+      creatorId: pass.creator?.creatorId ?? null,
+      creatorName: pass.creator?.name ?? null
+    }));
 
-    res.status(500).json({
-      error: err.toString()
+    return res.status(200).json(formatted);
+
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      error: error.message
     });
-
   }
-
 }
