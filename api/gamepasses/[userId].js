@@ -2,31 +2,38 @@ export default async function handler(req, res) {
 
   const { userId } = req.query;
 
-  if (!userId) {
+  if (!userId)
     return res.status(400).json({ error: "Missing userId" });
-  }
 
   try {
 
-    let universeIds = [];
+    let passes = [];
     let cursor = null;
 
-    // STEP 1: get ALL universes owned by the user
     do {
 
       const url =
-        `https://games.roblox.com/v2/users/${userId}/games?limit=50` +
+        `https://inventory.roblox.com/v1/users/${userId}/items/GamePass?limit=100` +
         (cursor ? `&cursor=${cursor}` : "");
 
       const response = await fetch(url);
 
       if (!response.ok)
-        throw new Error("Failed to fetch user games");
+        throw new Error("Inventory API failed");
 
       const json = await response.json();
 
-      for (const game of json.data) {
-        universeIds.push(game.id);
+      if (json.data) {
+
+        for (const item of json.data) {
+
+          passes.push({
+            id: item.assetId,
+            name: item.name
+          });
+
+        }
+
       }
 
       cursor = json.nextPageCursor;
@@ -34,60 +41,40 @@ export default async function handler(req, res) {
     } while (cursor);
 
 
+    // STEP 2: get price for each pass
+    let final = [];
 
-    // STEP 2: fetch passes from each universe
-    let passes = [];
+    for (const pass of passes) {
 
-    for (const universeId of universeIds) {
+      const product =
+        await fetch(
+          `https://apis.roblox.com/game-passes/v1/game-passes/${pass.id}/product-info`
+        );
 
-      let passCursor = null;
+      if (!product.ok)
+        continue;
 
-      do {
+      const info = await product.json();
 
-        const url =
-          `https://games.roblox.com/v1/games/${universeId}/game-passes?limit=100` +
-          (passCursor ? `&cursor=${passCursor}` : "");
+      if (info.PriceInRobux != null) {
 
-        const response = await fetch(url);
+        final.push({
+          id: pass.id,
+          name: pass.name,
+          price: info.PriceInRobux
+        });
 
-        if (!response.ok)
-          break;
-
-        const json = await response.json();
-
-        if (json.data) {
-
-          for (const pass of json.data) {
-
-            // only include passes that are actually for sale
-            if (pass.price != null) {
-
-              passes.push({
-                id: pass.id,
-                name: pass.name,
-                price: pass.price
-              });
-
-            }
-
-          }
-
-        }
-
-        passCursor = json.nextPageCursor;
-
-      } while (passCursor);
+      }
 
     }
 
-
-    res.status(200).json(passes);
+    res.status(200).json(final);
 
   }
   catch (err) {
 
     res.status(500).json({
-      error: err.message
+      error: err.toString()
     });
 
   }
