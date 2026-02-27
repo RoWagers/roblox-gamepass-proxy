@@ -9,63 +9,77 @@ export default async function handler(req, res) {
   try {
 
     let universeIds = [];
-    let cursor = "";
+    let cursor = null;
 
-    // STEP 1: get all experiences owned by user
+    // STEP 1: get ALL universes owned by the user
     do {
 
-      const gamesRes = await fetch(
-        `https://games.roblox.com/v2/users/${userId}/games?limit=50&cursor=${cursor}`
-      );
+      const url =
+        `https://games.roblox.com/v2/users/${userId}/games?limit=50` +
+        (cursor ? `&cursor=${cursor}` : "");
 
-      if (!gamesRes.ok) {
+      const response = await fetch(url);
+
+      if (!response.ok)
         throw new Error("Failed to fetch user games");
-      }
 
-      const gamesJson = await gamesRes.json();
+      const json = await response.json();
 
-      for (const game of gamesJson.data) {
+      for (const game of json.data) {
         universeIds.push(game.id);
       }
 
-      cursor = gamesJson.nextPageCursor;
+      cursor = json.nextPageCursor;
 
     } while (cursor);
 
 
-    // STEP 2: get passes from each universe
+
+    // STEP 2: fetch passes from each universe
     let passes = [];
 
     for (const universeId of universeIds) {
 
-      let passCursor = "";
+      let passCursor = null;
 
       do {
 
-        const passRes = await fetch(
-          `https://games.roblox.com/v1/games/${universeId}/game-passes?limit=100&cursor=${passCursor}`
-        );
+        const url =
+          `https://games.roblox.com/v1/games/${universeId}/game-passes?limit=100` +
+          (passCursor ? `&cursor=${passCursor}` : "");
 
-        if (!passRes.ok) break;
+        const response = await fetch(url);
 
-        const passJson = await passRes.json();
+        if (!response.ok)
+          break;
 
-        for (const pass of passJson.data) {
+        const json = await response.json();
 
-          passes.push({
-            id: pass.id,
-            name: pass.name,
-            price: pass.price,
-            universeId: universeId
-          });
+        if (json.data) {
+
+          for (const pass of json.data) {
+
+            // only include passes that are actually for sale
+            if (pass.price != null) {
+
+              passes.push({
+                id: pass.id,
+                name: pass.name,
+                price: pass.price
+              });
+
+            }
+
+          }
 
         }
 
-        passCursor = passJson.nextPageCursor;
+        passCursor = json.nextPageCursor;
 
       } while (passCursor);
 
     }
+
 
     res.status(200).json(passes);
 
@@ -73,7 +87,7 @@ export default async function handler(req, res) {
   catch (err) {
 
     res.status(500).json({
-      error: err.toString()
+      error: err.message
     });
 
   }
