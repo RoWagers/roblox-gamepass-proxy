@@ -8,67 +8,50 @@ export default async function handler(req, res) {
   try {
 
     let passes = [];
-    let cursor = null;
+    let lastId = "";
 
-    do {
+    while (true) {
 
       const url =
-        `https://inventory.roblox.com/v1/users/${userId}/items/GamePass?limit=100` +
-        (cursor ? `&cursor=${cursor}` : "");
+        `https://apis.roblox.com/game-passes/v1/users/${userId}/game-passes?count=100` +
+        (lastId ? `&exclusiveStartId=${lastId}` : "");
 
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        headers: {
+          "Accept": "application/json"
+        }
+      });
 
       if (!response.ok)
-        throw new Error("Inventory API failed");
+        throw new Error("Roblox API failed: " + response.status);
 
       const json = await response.json();
 
-      if (json.data) {
+      if (!json.data || json.data.length === 0)
+        break;
 
-        for (const item of json.data) {
+      for (const pass of json.data) {
+
+        if (pass.priceInRobux != null) {
 
           passes.push({
-            id: item.assetId,
-            name: item.name
+            id: pass.id,
+            name: pass.name,
+            price: pass.priceInRobux
           });
 
         }
 
       }
 
-      cursor = json.nextPageCursor;
+      lastId = json.data[json.data.length - 1].id;
 
-    } while (cursor);
-
-
-    // STEP 2: get price for each pass
-    let final = [];
-
-    for (const pass of passes) {
-
-      const product =
-        await fetch(
-          `https://apis.roblox.com/game-passes/v1/game-passes/${pass.id}/product-info`
-        );
-
-      if (!product.ok)
-        continue;
-
-      const info = await product.json();
-
-      if (info.PriceInRobux != null) {
-
-        final.push({
-          id: pass.id,
-          name: pass.name,
-          price: info.PriceInRobux
-        });
-
-      }
+      if (json.data.length < 100)
+        break;
 
     }
 
-    res.status(200).json(final);
+    res.status(200).json(passes);
 
   }
   catch (err) {
